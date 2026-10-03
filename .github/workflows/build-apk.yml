@@ -7,7 +7,9 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # 锁到 22.04：ubuntu-latest 现在是 24.04，移除了 libncurses5-dev/libtinfo5，会导致 apt 失败
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,22 +21,45 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y git zip unzip openjdk-17-jdk \
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            git zip unzip openjdk-17-jdk-headless \
             autoconf libtool pkg-config zlib1g-dev libncurses5-dev \
-            libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
+            libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev \
+            python3-dev python3-pip python3-venv ccache libltdl-dev
 
       - name: Set JAVA_HOME
         run: echo "JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java))))" >> "$GITHUB_ENV"
 
       - name: Install Buildozer
-        run: pip install --upgrade buildozer
+        run: |
+          pip install --upgrade pip
+          pip install --upgrade buildozer cython==0.29.36
+
+      - name: Show versions (for log)
+        run: |
+          python --version
+          buildozer --version 2>&1 | head -n 5
+          java -version 2>&1
+          echo "JAVA_HOME=$JAVA_HOME"
+          echo "ANDROIDSDK=$(echo $ANDROIDSDK)"
+          df -h $HOME
 
       - name: Build APK (debug)
-        run: buildozer android debug
+        run: buildozer -v android debug 2>&1 | tee build.log
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
           path: bin/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 30
